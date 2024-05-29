@@ -191,14 +191,15 @@ func testAccCheckLandingZoneDestroy(ctx context.Context) resource.TestCheckFunc 
 }
 
 const landingZoneVersion = "3.3"
+const governedRegionsBasic = `["us-west-2","eu-west-1","eu-central-1","us-east-1"]`
 
 var testAccLandingZoneConfig_basic = fmt.Sprintf(`
 resource "aws_controltower_landing_zone" "test" {
-  manifest_json = file("${path.module}/test-fixtures/LandingZoneManifest.json")
+  manifest_json = templatefile("${path.module}/test-fixtures/LandingZoneManifest.json.tftpl", { governedRegions = %[2]q })
 
-  version = %[2]q
+  version = %[3]q
 }
-`, acctest.Region(), landingZoneVersion)
+`, acctest.Region(), governedRegionsBasic, landingZoneVersion)
 
 func testAccLandingZoneConfig_tags1(tagKey1, tagValue1 string) string {
 	return fmt.Sprintf(`

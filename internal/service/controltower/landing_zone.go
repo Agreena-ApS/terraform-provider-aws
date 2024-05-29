@@ -4,9 +4,12 @@
 package controltower
 
 import (
+	"cmp"
 	"context"
+	eJson "encoding/json"
 	"errors"
 	"log"
+	"slices"
 	"strings"
 	"time"
 
@@ -72,10 +75,46 @@ func resourceLandingZone() *schema.Resource {
 				Computed: true,
 			},
 			"manifest_json": {
-				Type:                  schema.TypeString,
-				Required:              true,
-				ValidateFunc:          validation.StringIsJSON,
-				DiffSuppressFunc:      verify.SuppressEquivalentJSONDiffs,
+				Type:         schema.TypeString,
+				Required:     true,
+				ValidateFunc: validation.StringIsJSON,
+				DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+					if verify.SuppressEquivalentJSONDiffs(k, old, new, d) {
+						return true
+					}
+
+					// Retention days is already a string at this point
+					log.Printf("[DEBUG] OLD1 %#v", old)
+					log.Printf("[DEBUG] NEW1 %#v", new)
+
+					var oldJson Manifest
+					var newJson Manifest
+					eJson.Unmarshal([]byte(old), &oldJson)
+					eJson.Unmarshal([]byte(new), &newJson)
+
+					// Why is retention days being returned as a string?
+					log.Printf("[DEBUG] OLD retention days %#v", oldJson.CentralizedLogging.Configurations.AccessLoggingBucket.RetentionDays)
+					log.Printf("[DEBUG] NEW retention days %#v", newJson.CentralizedLogging.Configurations.AccessLoggingBucket.RetentionDays)
+
+					slices.SortFunc(oldJson.GovernedRegions, func(a, b string) int {
+						return cmp.Compare(strings.ToLower(a), strings.ToLower(b))
+					})
+					slices.SortFunc(newJson.GovernedRegions, func(a, b string) int {
+						return cmp.Compare(strings.ToLower(a), strings.ToLower(b))
+					})
+
+					oldString, _ := eJson.Marshal(oldJson)
+					newString, _ := eJson.Marshal(newJson)
+					if verify.SuppressEquivalentJSONDiffs(k, string(oldString), string(newString), d) {
+						log.Printf("[DEBUG] SuppressEquivalentJSONDiffs Now match OLD %#v", string(oldString))
+						log.Printf("[DEBUG] SuppressEquivalentJSONDiffs Now match NEW %#v", string(newString))
+						return true
+					}
+					log.Printf("[DEBUG] SuppressEquivalentJSONDiffs No match OLD %#v", string(oldString))
+					log.Printf("[DEBUG] SuppressEquivalentJSONDiffs No match NEW %#v", string(newString))
+
+					return false
+				},
 				DiffSuppressOnRefresh: true,
 				StateFunc: func(v interface{}) string {
 					json, _ := structure.NormalizeJsonString(v)
@@ -327,4 +366,35 @@ func flattenLandingZoneDriftStatusSummary(apiObject *types.LandingZoneDriftStatu
 	}
 
 	return tfMap
+}
+
+type Manifest struct {
+	GovernedRegions       []string `json:"governedRegions"`
+	OrganizationStructure struct {
+		Security struct {
+			Name string `json:"name"`
+		} `json:"security"`
+		Sandbox struct {
+			Name string `json:"name"`
+		} `json:"sandbox"`
+	} `json:"organizationStructure"`
+	CentralizedLogging struct {
+		AccountID      string `json:"accountId"`
+		Configurations struct {
+			LoggingBucket struct {
+				RetentionDays any `json:"retentionDays"`
+			} `json:"loggingBucket"`
+			AccessLoggingBucket struct {
+				RetentionDays any `json:"retentionDays"`
+			} `json:"accessLoggingBucket"`
+			KmsKeyArn string `json:"kmsKeyArn"`
+		} `json:"configurations"`
+		Enabled bool `json:"enabled"`
+	} `json:"centralizedLogging"`
+	SecurityRoles struct {
+		AccountID string `json:"accountId"`
+	} `json:"securityRoles"`
+	AccessManagement struct {
+		Enabled bool `json:"enabled"`
+	} `json:"accessManagement"`
 }
