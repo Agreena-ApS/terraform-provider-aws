@@ -8,8 +8,10 @@ import (
 	"context"
 	eJson "encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -83,18 +85,21 @@ func resourceLandingZone() *schema.Resource {
 						return true
 					}
 
-					// Retention days is already a string at this point
-					log.Printf("[DEBUG] OLD1 %#v", old)
-					log.Printf("[DEBUG] NEW1 %#v", new)
-
 					var oldJson Manifest
 					var newJson Manifest
 					eJson.Unmarshal([]byte(old), &oldJson)
 					eJson.Unmarshal([]byte(new), &newJson)
 
-					// Why is retention days being returned as a string?
-					log.Printf("[DEBUG] OLD retention days %#v", oldJson.CentralizedLogging.Configurations.AccessLoggingBucket.RetentionDays)
-					log.Printf("[DEBUG] NEW retention days %#v", newJson.CentralizedLogging.Configurations.AccessLoggingBucket.RetentionDays)
+					// Horrible hack to work around `AccessLoggingBucket.RetentionDays` & `LoggingBucket.RetentionDays` being converted into strings
+					oldAccessLoggingBucketRetentionDaysInt, _ := strconv.Atoi(fmt.Sprintf("%v", oldJson.CentralizedLogging.Configurations.AccessLoggingBucket.RetentionDays))
+					oldJson.CentralizedLogging.Configurations.AccessLoggingBucket.RetentionDays = oldAccessLoggingBucketRetentionDaysInt
+					newAccessLoggingBucketRetentionDaysInt, _ := strconv.Atoi(fmt.Sprintf("%v", newJson.CentralizedLogging.Configurations.AccessLoggingBucket.RetentionDays))
+					newJson.CentralizedLogging.Configurations.AccessLoggingBucket.RetentionDays = newAccessLoggingBucketRetentionDaysInt
+
+					oldLoggingBucketRetentionDaysInt, _ := strconv.Atoi(fmt.Sprintf("%v", oldJson.CentralizedLogging.Configurations.LoggingBucket.RetentionDays))
+					oldJson.CentralizedLogging.Configurations.LoggingBucket.RetentionDays = oldLoggingBucketRetentionDaysInt
+					newLoggingBucketRetentionDaysInt, _ := strconv.Atoi(fmt.Sprintf("%v", newJson.CentralizedLogging.Configurations.LoggingBucket.RetentionDays))
+					newJson.CentralizedLogging.Configurations.LoggingBucket.RetentionDays = newLoggingBucketRetentionDaysInt
 
 					slices.SortFunc(oldJson.GovernedRegions, func(a, b string) int {
 						return cmp.Compare(strings.ToLower(a), strings.ToLower(b))
@@ -106,12 +111,8 @@ func resourceLandingZone() *schema.Resource {
 					oldString, _ := eJson.Marshal(oldJson)
 					newString, _ := eJson.Marshal(newJson)
 					if verify.SuppressEquivalentJSONDiffs(k, string(oldString), string(newString), d) {
-						log.Printf("[DEBUG] SuppressEquivalentJSONDiffs Now match OLD %#v", string(oldString))
-						log.Printf("[DEBUG] SuppressEquivalentJSONDiffs Now match NEW %#v", string(newString))
 						return true
 					}
-					log.Printf("[DEBUG] SuppressEquivalentJSONDiffs No match OLD %#v", string(oldString))
-					log.Printf("[DEBUG] SuppressEquivalentJSONDiffs No match NEW %#v", string(newString))
 
 					return false
 				},
