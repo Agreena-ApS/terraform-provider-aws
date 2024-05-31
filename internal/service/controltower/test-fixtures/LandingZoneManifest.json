@@ -1,5 +1,5 @@
 {
-  "governedRegions": ["eu-west-1","eu-central-1","us-east-1","us-west-2"],
+  "governedRegions": ["us-west-2", "us-west-1"],
   "organizationStructure": {
     "security": {
       "name": "CORE"

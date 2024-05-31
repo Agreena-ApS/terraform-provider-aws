@@ -6,7 +6,7 @@ package controltower
 import (
 	"cmp"
 	"context"
-	eJson "encoding/json"
+	encodingJson "encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -85,12 +85,15 @@ func resourceLandingZone() *schema.Resource {
 						return true
 					}
 
-					var oldJson Manifest
-					var newJson Manifest
-					eJson.Unmarshal([]byte(old), &oldJson)
-					eJson.Unmarshal([]byte(new), &newJson)
+					old = sortGovernedRegions(old)
+					new = sortGovernedRegions(new)
 
 					// Horrible hack to work around `AccessLoggingBucket.RetentionDays` & `LoggingBucket.RetentionDays` being converted into strings
+					var oldJson Manifest
+					var newJson Manifest
+					encodingJson.Unmarshal([]byte(old), &oldJson)
+					encodingJson.Unmarshal([]byte(new), &newJson)
+
 					oldAccessLoggingBucketRetentionDaysInt, _ := strconv.Atoi(fmt.Sprintf("%v", oldJson.CentralizedLogging.Configurations.AccessLoggingBucket.RetentionDays))
 					oldJson.CentralizedLogging.Configurations.AccessLoggingBucket.RetentionDays = oldAccessLoggingBucketRetentionDaysInt
 					newAccessLoggingBucketRetentionDaysInt, _ := strconv.Atoi(fmt.Sprintf("%v", newJson.CentralizedLogging.Configurations.AccessLoggingBucket.RetentionDays))
@@ -101,16 +104,12 @@ func resourceLandingZone() *schema.Resource {
 					newLoggingBucketRetentionDaysInt, _ := strconv.Atoi(fmt.Sprintf("%v", newJson.CentralizedLogging.Configurations.LoggingBucket.RetentionDays))
 					newJson.CentralizedLogging.Configurations.LoggingBucket.RetentionDays = newLoggingBucketRetentionDaysInt
 
-					slices.SortFunc(oldJson.GovernedRegions, func(a, b string) int {
-						return cmp.Compare(strings.ToLower(a), strings.ToLower(b))
-					})
-					slices.SortFunc(newJson.GovernedRegions, func(a, b string) int {
-						return cmp.Compare(strings.ToLower(a), strings.ToLower(b))
-					})
+					oldSMarshalled, _ := encodingJson.Marshal(oldJson)
+					newMarshalled, _ := encodingJson.Marshal(newJson)
+					old = string(oldSMarshalled)
+					new = string(newMarshalled)
 
-					oldString, _ := eJson.Marshal(oldJson)
-					newString, _ := eJson.Marshal(newJson)
-					if verify.SuppressEquivalentJSONDiffs(k, string(oldString), string(newString), d) {
+					if verify.SuppressEquivalentJSONDiffs(k, old, new, d) {
 						return true
 					}
 
@@ -244,7 +243,6 @@ func resourceLandingZoneDelete(ctx context.Context, d *schema.ResourceData, meta
 	var diags diag.Diagnostics
 	conn := meta.(*conns.AWSClient).ControlTowerClient(ctx)
 
-	log.Printf("[DEBUG] Deleting ControlTower Landing Zone: %s", d.Id())
 	output, err := conn.DeleteLandingZone(ctx, &controltower.DeleteLandingZoneInput{
 		LandingZoneIdentifier: aws.String(d.Id()),
 	})
@@ -369,6 +367,19 @@ func flattenLandingZoneDriftStatusSummary(apiObject *types.LandingZoneDriftStatu
 	return tfMap
 }
 
+func sortGovernedRegions(json string) string {
+	var manifestJson Manifest
+	encodingJson.Unmarshal([]byte(json), &manifestJson)
+
+	slices.SortFunc(manifestJson.GovernedRegions, func(a, b string) int {
+		return cmp.Compare(strings.ToLower(a), strings.ToLower(b))
+	})
+	jsonSorted, _ := encodingJson.Marshal(manifestJson)
+	return string(jsonSorted)
+}
+
+// LoggingBucket.RetentionDays & AccessLoggingBucket.RetentionDays should be float64 but need to be able to accept string until
+// bug with them being converted once recieved from aws
 type Manifest struct {
 	GovernedRegions       []string `json:"governedRegions"`
 	OrganizationStructure struct {
@@ -376,8 +387,8 @@ type Manifest struct {
 			Name string `json:"name"`
 		} `json:"security"`
 		Sandbox struct {
-			Name string `json:"name"`
-		} `json:"sandbox"`
+			Name string `json:"name,omitempty"`
+		} `json:"sandbox,omitempty"`
 	} `json:"organizationStructure"`
 	CentralizedLogging struct {
 		AccountID      string `json:"accountId"`
